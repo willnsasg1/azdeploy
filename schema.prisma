@@ -1,0 +1,406 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  displayName String
+  isAdmin     Boolean  @default(false)
+  externalRef String?  // e.g. Entra object ID
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  auditLogs       AuditLog[]
+  projectMessages ProjectMessage[]
+}
+
+model Account {
+  id          String      @id @default(uuid())
+  name        String
+  type        AccountType // Client, Vendor, Contractor
+  externalRef String? // e.g. Dynamics ID
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  contacts         Contact[]
+  projects         Project[]
+  bookingConfigs   BookingConfig[]
+  bookingLinks     BookingLink[]
+  deletionRequests DeletionRequest[]
+  archiveRequests  ArchiveRequest[]
+}
+
+enum AccountType {
+  CLIENT
+  VENDOR
+  CONTRACTOR
+}
+
+model Contact {
+  id             String   @id @default(uuid())
+  accountId      String?
+  account        Account? @relation(fields: [accountId], references: [id])
+  displayName    String
+  email          String?  @unique
+  phone          String?
+  roleHint       String? // e.g. PM, Owner, etc.
+  externalRef    String? // e.g. Dynamics contact ID
+  externalSystem String? // "DYNAMICS365" or "LOCAL" - tracks source of truth
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  participants    ProjectParticipant[]
+  messages        Message[]
+  projectMessages ProjectMessage[]
+  invites         ParticipantInvite[]
+}
+
+model Project {
+  id                  String        @id @default(uuid())
+  accountId           String
+  account             Account       @relation(fields: [accountId], references: [id])
+  name                String
+  status              ProjectStatus @default(PLANNING)
+  dtoolsProjectId     String?
+  dynamicsWorkOrderId String?
+  description         String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  participants        ProjectParticipant[]
+  files               File[]
+  conversations       Conversation[]
+  announcements       Announcement[]
+  commLogs            CommunicationLog[]
+  auditLogs           AuditLog[]
+  meetings            Meeting[]
+  teamsConfigs        TeamsConfig[]
+  bookingConfigs      BookingConfig[]
+  bookingLinks        BookingLink[]
+  participantRequests ParticipantAddRequest[]
+  invites             ParticipantInvite[]
+  messages            ProjectMessage[]
+}
+
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+model ProjectParticipant {
+  id         String   @id @default(uuid())
+  projectId  String
+  contactId  String
+  role       String // e.g. Project Manager, Tech, Client Rep
+  isInternal Boolean // true = your staff; false = external
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id])
+  contact Contact @relation(fields: [contactId], references: [id])
+  invites ParticipantInvite[]
+}
+
+
+model File {
+  id               String               @id @default(uuid())
+  projectId        String
+  project          Project              @relation(fields: [projectId], references: [id])
+  displayName      String // original filename
+  blobPath         String // path/key in Blob storage
+  contentType      String?
+  sizeBytes        Int?
+  category         String? // e.g. drawing, contract, etc.
+  externalProvider FileExternalProvider @default(AZURE)
+  externalId       String? // e.g. driveItem ID, PwPush ID, etc.
+  isArchived       Boolean              @default(false)
+  visibility       FileVisibility       @default(INTERNAL_ONLY)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  auditLogs AuditLog[]
+}
+
+enum FileExternalProvider {
+  AZURE
+  SHAREPOINT
+  ONEDRIVE
+  PWPUSH
+  TEAMSRECORDING
+  OTHER
+}
+
+enum FileVisibility {
+  INTERNAL_ONLY
+  EXTERNAL_SHARED
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  title       String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages Message[]
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  contactId      String?
+  contact        Contact?     @relation(fields: [contactId], references: [id])
+  body           String
+  createdAt      DateTime     @default(now())
+}
+
+model Announcement {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  title       String
+  body        String
+  visibility  String // JSON list of audience types, e.g. ["Internal","Client"]
+  createdById String
+  createdAt   DateTime @default(now())
+}
+
+model CommunicationLog {
+  id                String        @id @default(uuid())
+  projectId         String
+  project           Project       @relation(fields: [projectId], references: [id])
+  channel           CommChannel
+  direction         CommDirection
+  subject           String?
+  bodyPreview       String?
+  relatedContactId  String?
+  providerMessageId String?
+  status            String?
+  meta              Json?
+  createdAt         DateTime      @default(now())
+}
+
+enum CommChannel {
+  EMAIL
+  SMS
+  PWPUSH
+  OTHER
+}
+
+enum CommDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id])
+  actorUserId    String?
+  actorUser      User?    @relation(fields: [actorUserId], references: [id])
+  actorContactId String?
+  action         String // e.g. "FILE_UPLOADED", "STATUS_CHANGED"
+  details        Json?
+  fileId         String?
+  file           File?    @relation(fields: [fileId], references: [id])
+  meetingId      String?
+  meeting        Meeting? @relation(fields: [meetingId], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+model ParticipantAddRequest {
+  id            String        @id @default(uuid())
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id])
+  requestedById String? // user/contact who requested
+  contactEmail  String
+  contactName   String?
+  contactRole   String?
+  status        RequestStatus @default(PENDING)
+  decisionById  String?
+  decisionAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  invites       ParticipantInvite[]
+}
+
+model ParticipantInvite {
+  id            String                @id @default(uuid())
+  projectId     String
+  project       Project               @relation(fields: [projectId], references: [id])
+  contactId     String
+  contact       Contact               @relation(fields: [contactId], references: [id])
+  participantId String?
+  participant   ProjectParticipant?   @relation(fields: [participantId], references: [id])
+  requestId     String
+  request       ParticipantAddRequest @relation(fields: [requestId], references: [id])
+  token         String                @unique
+  status        InvitationStatus      @default(PENDING)
+  expiresAt     DateTime
+  sentAt        DateTime?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+}
+
+model DeletionRequest {
+  id              String        @id @default(uuid())
+  clientAccountId String
+  client          Account       @relation(fields: [clientAccountId], references: [id])
+  reason          String?
+  status          RequestStatus @default(PENDING)
+  requestedById   String?
+  decisionById    String?
+  decisionAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model ArchiveRequest {
+  id              String        @id @default(uuid())
+  clientAccountId String
+  client          Account       @relation(fields: [clientAccountId], references: [id])
+  reason          String?
+  status          RequestStatus @default(PENDING)
+  requestedById   String?
+  decisionById    String?
+  decisionAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum InvitationStatus {
+  PENDING
+  SENT
+  EXPIRED
+  COMPLETED
+}
+
+model TeamsConfig {
+  id                      String   @id @default(uuid())
+  projectId               String
+  project                 Project  @relation(fields: [projectId], references: [id])
+  teamId                  String
+  channelId               String
+  notificationPreferences Json? // e.g. ["AnnouncementCreated","StatusChanged"]
+  createdById             String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
+
+model Meeting {
+  id                   String          @id @default(uuid())
+  projectId            String
+  project              Project         @relation(fields: [projectId], references: [id])
+  createdById          String?
+  subject              String
+  startDateTime        DateTime
+  endDateTime          DateTime
+  visibility           Json? // ["Internal","Client","Vendor"]
+  source               MeetingSource   @default(NINJA)
+  onlineMeetingId      String?
+  joinUrl              String?
+  calendarEventId      String?
+  bookingBusinessId    String?
+  bookingAppointmentId String?
+  attendees            Json? // list of contact/user ids/emails
+  recordingStatus      RecordingStatus @default(NONE)
+  recordingUrl         String?
+  recordingFileId      String?
+  transcriptStatus     RecordingStatus @default(NONE)
+  transcriptUrl        String?
+  transcriptFileId     String?
+  recapUrl             String?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  auditLogs AuditLog[]
+}
+
+enum MeetingSource {
+  NINJA
+  BOOKINGS
+  DYNAMICS
+  OTHER
+}
+
+enum RecordingStatus {
+  NONE
+  PROCESSING
+  AVAILABLE
+  FAILED
+}
+
+model BookingConfig {
+  id                String           @id @default(uuid())
+  scopeType         BookingScopeType
+  scopeProjectId    String?
+  scopeProject      Project?         @relation(fields: [scopeProjectId], references: [id])
+  scopeAccountId    String?
+  scopeAccount      Account?         @relation(fields: [scopeAccountId], references: [id])
+  bookingBusinessId String
+  defaultServiceIds Json?
+  allowedStaffIds   Json?
+  createdById       String
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+enum BookingScopeType {
+  PROJECT
+  CLIENT
+  ORG
+}
+
+model BookingLink {
+  id        String   @id @default(uuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+  accountId String?
+  account   Account? @relation(fields: [accountId], references: [id])
+  label     String
+  url       String
+  serviceId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProjectMessage {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  /// Internal users (when using Entra / internal auth)
+  senderUserId    String?
+  senderUser      User?   @relation(fields: [senderUserId], references: [id])
+
+  /// External contacts (clients, vendors, etc.)
+  senderContactId String?
+  senderContact   Contact? @relation(fields: [senderContactId], references: [id])
+
+  senderName      String
+  senderEmail     String?
+
+  body            String
+  isAnnouncement  Boolean  @default(false)
+  isInternalOnly  Boolean  @default(true)
+  createdAt       DateTime @default(now())
+}
